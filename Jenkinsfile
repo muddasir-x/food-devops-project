@@ -44,7 +44,7 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    docker.withRegistry('', 'docker-hub-credentials') {
+                    docker.withRegistry('', 'docker hub credentials') {
                         sh "docker push ${BACKEND_IMAGE}"
                         sh "docker push ${DOCKER_HUB_USER}/flavorfusion-backend:latest"
                         sh "docker push ${FRONTEND_IMAGE}"
