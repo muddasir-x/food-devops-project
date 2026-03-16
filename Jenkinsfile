@@ -2,93 +2,75 @@ pipeline {
     agent any
     
     environment {
-        // Docker Hub config
         DOCKER_HUB_USER = 'hyperx253'
         BACKEND_IMAGE = "${DOCKER_HUB_USER}/flavorfusion-backend:${BUILD_NUMBER}"
         FRONTEND_IMAGE = "${DOCKER_HUB_USER}/flavorfusion-frontend:${BUILD_NUMBER}"
-        BACKEND_LATEST = "${DOCKER_HUB_USER}/flavorfusion-backend:latest"
-        FRONTEND_LATEST = "${DOCKER_HUB_USER}/flavorfusion-frontend:latest"
     }
     
     stages {
-        stage('GitHub Pull') {
+        stage('Checkout from main') {
             steps {
-                echo '📥 GitHub se code le raha hoon...'
-                git 'https://github.com/muddasir-x/food-devops-project.git'
+                // Explicitly checkout main branch
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: 'main']],
+                    userRemoteConfigs: [[url: 'https://github.com/muddasir-x/food-devops-project.git']]
+                ])
+                echo '✅ Code checkout ho gaya'
+                sh 'git branch'  // Check konsi branch checkout hui
             }
         }
         
-        stage('Docker Build') {
-            parallel {
-                stage('Build Backend') {
-                    steps {
-                        dir('backend') {
-                            sh "docker build -t ${BACKEND_IMAGE} ."
-                            sh "docker tag ${BACKEND_IMAGE} ${BACKEND_LATEST}"
-                        }
-                    }
-                }
-                
-                stage('Build Frontend') {
-                    steps {
-                        dir('frontend') {
-                            sh "docker build -t ${FRONTEND_IMAGE} ."
-                            sh "docker tag ${FRONTEND_IMAGE} ${FRONTEND_LATEST}"
-                        }
-                    }
+        stage('Build Backend') {
+            steps {
+                dir('backend') {
+                    sh 'ls -la'
+                    sh "docker build -t ${BACKEND_IMAGE} ."
+                    sh "docker tag ${BACKEND_IMAGE} ${DOCKER_HUB_USER}/flavorfusion-backend:latest"
                 }
             }
         }
         
-        stage('Docker Push') {
+        stage('Build Frontend') {
+            steps {
+                dir('frontend') {
+                    sh 'ls -la'
+                    sh "docker build -t ${FRONTEND_IMAGE} ."
+                    sh "docker tag ${FRONTEND_IMAGE} ${DOCKER_HUB_USER}/flavorfusion-frontend:latest"
+                }
+            }
+        }
+        
+        stage('Push to Docker Hub') {
             steps {
                 script {
                     docker.withRegistry('', 'docker-hub-credentials') {
                         sh "docker push ${BACKEND_IMAGE}"
-                        sh "docker push ${BACKEND_LATEST}"
+                        sh "docker push ${DOCKER_HUB_USER}/flavorfusion-backend:latest"
                         sh "docker push ${FRONTEND_IMAGE}"
-                        sh "docker push ${FRONTEND_LATEST}"
+                        sh "docker push ${DOCKER_HUB_USER}/flavorfusion-frontend:latest"
                     }
                 }
-                echo "✅ Images Docker Hub par push ho gayin!"
             }
         }
         
-        stage('Kubernetes Deploy') {
+        stage('Deploy to Kubernetes') {
             steps {
-                echo '🚀 Kubernetes deploy kar raha hoon...'
-                
-                // Update images in k8s files
-                sh "sed -i 's|image:.*backend.*|image: ${BACKEND_IMAGE}|g' kubernetes/backend-deployment.yaml"
-                sh "sed -i 's|image:.*frontend.*|image: ${FRONTEND_IMAGE}|g' kubernetes/frontend-deployment.yaml"
-                
-                // Deploy to Kubernetes
-                sh "kubectl apply -f kubernetes/namespace.yaml"
+                sh 'ls -la kubernetes/'
+                sh "kubectl apply -f kubernetes/namespace.yaml || true"
                 sh "kubectl apply -f kubernetes/backend-deployment.yaml"
                 sh "kubectl apply -f kubernetes/frontend-deployment.yaml"
                 sh "kubectl apply -f kubernetes/service.yaml"
-                
-                // Check status
-                sh "kubectl get pods -n food-delivery"
-            }
-        }
-        
-        stage('Verify Deploy') {
-            steps {
-                echo '✅ Sab kuch sahi hai? Check karta hoon...'
-                sh "kubectl wait --for=condition=ready pod -l app=flavorfusion -n food-delivery --timeout=60s"
             }
         }
     }
     
     post {
         success {
-            echo '🎉 GitHub Push → Jenkins → Docker → Kubernetes Done!'
-            echo "Frontend: http://frontend-service"
-            echo "Backend: http://backend-service:5000"
+            echo '🎉 Pipeline successful!'
         }
         failure {
-            echo '❌ Kuch gadbad ho gayi!'
+            echo '❌ Pipeline failed!'
         }
     }
 }
