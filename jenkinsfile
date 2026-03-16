@@ -2,170 +2,93 @@ pipeline {
     agent any
     
     environment {
-        // Roman Urdu: Apne Docker Hub username se change karo!
-        DOCKER_REGISTRY = 'docker.io'
-        DOCKER_HUB_USER = 'tumhara_docker_username'   // ← YAHAN APNA USERNAME LIKHO
-        DOCKER_IMAGE_BACKEND = "${DOCKER_REGISTRY}/${DOCKER_HUB_USER}/flavorfusion-backend"
-        DOCKER_IMAGE_FRONTEND = "${DOCKER_REGISTRY}/${DOCKER_HUB_USER}/flavorfusion-frontend"
-        
-        // Roman Urdu: Version tagging
-        BUILD_VERSION = "${BUILD_NUMBER}"
-        GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        // Docker Hub config
+        DOCKER_HUB_USER = 'hyperx253'
+        BACKEND_IMAGE = "${DOCKER_HUB_USER}/flavorfusion-backend:${BUILD_NUMBER}"
+        FRONTEND_IMAGE = "${DOCKER_HUB_USER}/flavorfusion-frontend:${BUILD_NUMBER}"
+        BACKEND_LATEST = "${DOCKER_HUB_USER}/flavorfusion-backend:latest"
+        FRONTEND_LATEST = "${DOCKER_HUB_USER}/flavorfusion-frontend:latest"
     }
     
     stages {
-        stage('Checkout Code') {
+        stage('GitHub Pull') {
             steps {
-                echo '📥 Code checkout ho raha hai...'
-                git branch: 'main', 
-                    url: 'https://github.com/muddasir-x/kubernetes-project.git'  // ← APNA GITHUB LINK
+                echo '📥 GitHub se code le raha hoon...'
+                git 'https://github.com/hyperx253/food-devops-project.git'
             }
         }
         
-        stage('Install Dependencies') {
-            steps {
-                dir('backend') {
-                    echo '📦 Backend dependencies install ho rahi hain...'
-                    sh 'npm ci'
+        stage('Docker Build') {
+            parallel {
+                stage('Build Backend') {
+                    steps {
+                        dir('backend') {
+                            sh "docker build -t ${BACKEND_IMAGE} ."
+                            sh "docker tag ${BACKEND_IMAGE} ${BACKEND_LATEST}"
+                        }
+                    }
+                }
+                
+                stage('Build Frontend') {
+                    steps {
+                        dir('frontend') {
+                            sh "docker build -t ${FRONTEND_IMAGE} ."
+                            sh "docker tag ${FRONTEND_IMAGE} ${FRONTEND_LATEST}"
+                        }
+                    }
                 }
             }
         }
         
-        stage('Run Tests') {
+        stage('Docker Push') {
             steps {
-                echo '🧪 Tests chal rahe hain...'
-                dir('backend') {
-                    sh 'npm test || echo "Tests nahi hain abhi"'
-                }
-            }
-        }
-        
-        stage('Build Docker Images') {
-            steps {
-                echo '🐳 Docker images build ho rahi hain...'
-                
-                // Roman Urdu: Pehle Docker Hub login karo
-                sh 'echo $DOCKER_HUB_PASSWORD | docker login -u $DOCKER_HUB_USER --password-stdin'
-                
-                // Roman Urdu: Backend image build
-                dir('backend') {
-                    sh """
-                        docker build -t ${DOCKER_IMAGE_BACKEND}:${BUILD_VERSION} .
-                        docker tag ${DOCKER_IMAGE_BACKEND}:${BUILD_VERSION} ${DOCKER_IMAGE_BACKEND}:latest
-                    """
-                }
-                
-                // Roman Urdu: Frontend image build
-                dir('frontend') {
-                    sh """
-                        docker build -t ${DOCKER_IMAGE_FRONTEND}:${BUILD_VERSION} .
-                        docker tag ${DOCKER_IMAGE_FRONTEND}:${BUILD_VERSION} ${DOCKER_IMAGE_FRONTEND}:latest
-                    """
-                }
-            }
-        }
-        
-        stage('Push Docker Images') {
-            steps {
-                echo '📤 Docker images push ho rahi hain...'
-                
-                sh """
-                    docker push ${DOCKER_IMAGE_BACKEND}:${BUILD_VERSION}
-                    docker push ${DOCKER_IMAGE_BACKEND}:latest
-                    docker push ${DOCKER_IMAGE_FRONTEND}:${BUILD_VERSION}
-                    docker push ${DOCKER_IMAGE_FRONTEND}:latest
-                """
-            }
-        }
-        
-        stage('Deploy to Kubernetes') {
-            steps {
-                echo '🚀 Kubernetes deploy ho raha hai...'
-                
                 script {
-                    // Roman Urdu: Update image tags in deployments
-                    sh """
-                        sed -i 's|image: .*backend:.*|image: ${DOCKER_IMAGE_BACKEND}:${BUILD_VERSION}|g' kubernetes/backend-deployment.yaml
-                        sed -i 's|image: .*frontend:.*|image: ${DOCKER_IMAGE_FRONTEND}:${BUILD_VERSION}|g' kubernetes/frontend-deployment.yaml
-                    """
-                    
-                    // Roman Urdu: Apply Kubernetes configurations
-                    sh """
-                        kubectl apply -f kubernetes/namespace.yaml
-                        kubectl apply -f kubernetes/backend-deployment.yaml
-                        kubectl apply -f kubernetes/frontend-deployment.yaml
-                        kubectl apply -f kubernetes/service.yaml
-                    """
+                    docker.withRegistry('', 'docker-hub-credentials') {
+                        sh "docker push ${BACKEND_IMAGE}"
+                        sh "docker push ${BACKEND_LATEST}"
+                        sh "docker push ${FRONTEND_IMAGE}"
+                        sh "docker push ${FRONTEND_LATEST}"
+                    }
                 }
+                echo "✅ Images Docker Hub par push ho gayin!"
             }
         }
         
-        stage('Verify Deployment') {
+        stage('Kubernetes Deploy') {
             steps {
-                echo '✅ Deployment verify ho raha hai...'
+                echo '🚀 Kubernetes deploy kar raha hoon...'
                 
-                script {
-                    // Roman Urdu: Check if pods are running
-                    sh """
-                        kubectl wait --for=condition=ready pod -l app=flavorfusion --timeout=300s
-                        kubectl get pods -n food-delivery
-                        kubectl get services -n food-delivery
-                    """
-                }
+                // Update images in k8s files
+                sh "sed -i 's|image:.*backend.*|image: ${BACKEND_IMAGE}|g' kubernetes/backend-deployment.yaml"
+                sh "sed -i 's|image:.*frontend.*|image: ${FRONTEND_IMAGE}|g' kubernetes/frontend-deployment.yaml"
+                
+                // Deploy to Kubernetes
+                sh "kubectl apply -f kubernetes/namespace.yaml"
+                sh "kubectl apply -f kubernetes/backend-deployment.yaml"
+                sh "kubectl apply -f kubernetes/frontend-deployment.yaml"
+                sh "kubectl apply -f kubernetes/service.yaml"
+                
+                // Check status
+                sh "kubectl get pods -n food-delivery"
             }
         }
         
-        stage('Smoke Tests') {
+        stage('Verify Deploy') {
             steps {
-                echo '🔥 Smoke tests chal rahe hain...'
-                
-                script {
-                    // Roman Urdu: Get service URLs
-                    def frontend_url = sh(
-                        script: "kubectl get svc frontend-service -n food-delivery -o jsonpath='{.spec.clusterIP}'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    def backend_url = sh(
-                        script: "kubectl get svc backend-service -n food-delivery -o jsonpath='{.spec.clusterIP}'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    // Roman Urdu: Test backend health
-                    sh "curl -f http://${backend_url}:5000/health || exit 1"
-                    
-                    // Roman Urdu: Test frontend
-                    sh "curl -f http://${frontend_url}:80 || exit 1"
-                }
+                echo '✅ Sab kuch sahi hai? Check karta hoon...'
+                sh "kubectl wait --for=condition=ready pod -l app=flavorfusion -n food-delivery --timeout=60s"
             }
         }
     }
     
     post {
         success {
-            echo '🎉 Pipeline successfully complete ho gayi!'
-            
-            // Roman Urdu: Send success notification
-            emailext (
-                subject: "✅ Pipeline Success: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
-                body: "Build successful! Version: ${BUILD_VERSION}\nDocker Images:\n- ${DOCKER_IMAGE_BACKEND}:${BUILD_VERSION}\n- ${DOCKER_IMAGE_FRONTEND}:${BUILD_VERSION}",
-                to: 'team@flavorfusion.com'
-            )
+            echo '🎉 GitHub Push → Jenkins → Docker → Kubernetes Done!'
+            echo "Frontend: http://frontend-service"
+            echo "Backend: http://backend-service:5000"
         }
-        
         failure {
-            echo '❌ Pipeline failed!'
-            
-            emailext (
-                subject: "❌ Pipeline Failed: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
-                body: "Build failed! Please check Jenkins logs.",
-                to: 'team@flavorfusion.com'
-            )
-        }
-        
-        always {
-            echo '🧹 Cleaning up...'
-            sh 'docker system prune -f || true'
+            echo '❌ Kuch gadbad ho gayi!'
         }
     }
 }
