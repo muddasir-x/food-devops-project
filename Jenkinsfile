@@ -56,11 +56,11 @@ pipeline {
         
         stage('Deploy to Kubernetes') {
             steps {
-                sh 'ls -la kubernetes/'
-                sh "kubectl apply -f kubernetes/namespace.yaml || true"
-                sh "kubectl apply -f kubernetes/backend-deployment.yaml"
-                sh "kubectl apply -f kubernetes/frontend-deployment.yaml"
-                sh "kubectl apply -f kubernetes/service.yaml"
+                env.PATH = "/usr/local/bin:${env.PATH}"
+            sh 'kubectl apply -f kubernetes/namespace.yaml || true'
+            sh 'kubectl apply -f kubernetes/backend-deployment.yaml'
+            sh 'kubectl apply -f kubernetes/frontend-deployment.yaml'
+            sh 'kubectl apply -f kubernetes/service.yaml'
             }
         }
     }
