@@ -86,6 +86,7 @@ pipeline {
             echo '🎉 GitHub Push → Jenkins → Docker → Kubernetes Done!'
             echo "Frontend: http://frontend-service"
             echo "Backend: http://backend-service:5000"
+            echo "we done this job"
         }
         failure {
             echo '❌ Kuch gadbad ho gayi!'
