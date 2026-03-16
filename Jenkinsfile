@@ -14,7 +14,7 @@ pipeline {
         stage('GitHub Pull') {
             steps {
                 echo '📥 GitHub se code le raha hoon...'
-                git 'https://github.com/muddasir-x/food-devops-project'
+                git 'https://github.com/muddasir-x/food-devops-project.git'
             }
         }
         
